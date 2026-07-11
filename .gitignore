@@ -1,0 +1,19 @@
+# Python
+.venv/              # virtual env — recreated from code, never committed
+__pycache__/        # compiled bytecode cache
+*.pyc
+.pytest_cache/      # test runner cache
+
+# Node (Week 2)
+node_modules/       # dependencies — restored via npm install
+dist/               # compiled TS output
+
+# Generated data — the crawler BUILDS this, it's not source
+data/*.db
+
+# Private planning & notes (your journal, the AI suggestions, the plan)
+resources/
+
+# OS / editor noise
+.DS_Store
+Thumbs.db

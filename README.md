@@ -1,0 +1,141 @@
+# The Polyglot Engine
+
+> A multithreaded web crawler built in **pure Python (standard library only)** feeding a **TypeScript CLI**
+> with a crash-safe, append-only **branching session tree**. Two runtimes, one SQLite contract.
+
+<!-- CI badge goes here once GitHub Actions is set up (Phase D):
+[![CI](https://github.com/<you>/polyglot-engine/actions/workflows/ci.yml/badge.svg)](../../actions) -->
+
+**Status:** 🚧 In active development — see the [Roadmap](#roadmap).
+
+---
+
+## Overview
+
+The Polyglot Engine is a two-process system that deliberately avoids heavy frameworks to demonstrate the
+fundamentals underneath them:
+
+- A **Python crawler** downloads and parses web pages concurrently using a **hand-built thread pool** and a
+  **thread-safe bounded queue** (no `concurrent.futures`, no `requests`, no `scrapy`), caching results in
+  SQLite.
+- A **TypeScript CLI** reads that cache and provides an interactive, **forkable** conversation over the
+  crawled data. The entire session is stored as an append-only JSONL journal with per-line checksums, so a
+  crash mid-write is detected and recovered rather than silently corrupting state.
+
+The two halves are fully decoupled: they communicate **only** through a shared SQLite schema.
+
+## Architecture
+
+```
+┌────────────────────────────┐   writes    ┌────────────────────────────────┐
+│   PYTHON CRAWLER            │────────────▶│   TypeScript CLI               │
+│   (stdlib, multithreaded)   │   SQLite    │   (branching session tree)     │
+│                            │  (shared    │                                │
+│  seed URLs                 │  contract)  │  reads crawled pages           │
+│    → thread-safe queue      │             │  interactive shell:            │
+│    → custom thread pool      │             │   /query /view /fork /tree     │
+│      ├─ fetcher threads     │             │  every turn appended to an     │
+│      └─ parser threads      │             │  append-only JSONL journal     │
+│    → SQLite page cache       │             │  (checksums + crash-safety)    │
+└────────────────────────────┘             └────────────────────────────────┘
+        Python process                            Node process
+                    \________ SQLite is the only integration point ________/
+```
+
+## Tech Stack
+
+| Side | Stack | Notable constraint |
+|------|-------|--------------------|
+| Crawler | Python 3.11+, **standard library only** | Concurrency primitives are hand-rolled |
+| CLI | TypeScript / Node.js 20+ | Tree & persistence logic self-contained |
+| Shared | SQLite | The integration contract |
+
+## Project Structure
+
+```
+polyglot-engine/
+├─ python_engine/          # Python crawler (stdlib only)
+│   ├─ __init__.py
+│   └─ db.py               # SQLite schema + page-cache accessors
+├─ ts-cli/                 # TypeScript CLI (Phase 2)
+│   └─ src/
+├─ data/                   # Generated SQLite database (gitignored)
+│   └─ .gitkeep
+├─ tests/                  # Test suite
+├─ .github/workflows/      # CI (Phase D)
+├─ README.md
+└─ LICENSE
+```
+
+## Getting Started
+
+### Prerequisites
+- Python 3.11+
+- Node.js 20+ *(for the CLI, Phase 2)*
+
+### Setup
+```bash
+# clone, then from the project root:
+python -m venv .venv
+# Windows:
+.venv\Scripts\activate
+# macOS/Linux:
+source .venv/bin/activate
+```
+No `pip install` is required — the crawler uses only the standard library.
+
+### Run
+```bash
+# Initialize / inspect the SQLite schema:
+python -m python_engine.db
+```
+*(More commands will appear here as the crawler and CLI are built.)*
+
+## Testing
+
+<!-- TODO (Phase C): document how to run the test suite once pytest/unittest is set up. -->
+_Coming soon — test suite in progress._
+
+## Design Decisions
+
+<!--
+  TODO — WRITE THIS YOURSELF. This section is the most valuable part of the README for a portfolio,
+  and it's your interview prep. For each decision, write 2-3 sentences on WHY you made it and what the
+  alternative was. Prompts to answer:
+
+  - Why is `url` the PRIMARY KEY of the pages table (instead of a surrogate auto-increment id)?
+  - Why SQLite as the boundary between the two processes, rather than a REST API or a JSON file?
+  - Why an append-only JSONL journal for session state instead of editing records in place?
+  - Why per-line checksums and a single-writer lock?
+  - Is the "lock-free" queue truly lock-free? What role does the GIL play?
+
+  Write these in your own words. If you can't yet, that means the concept isn't solid — revisit it.
+-->
+
+## What I Learned
+
+<!--
+  TODO — WRITE THIS YOURSELF as you go. A short, honest list of the concepts this project taught you
+  (concurrency, the GIL, append-only logs, crash safety, TDD, git workflow...). Recruiters love this
+  section; it signals self-awareness and growth.
+-->
+
+## Roadmap
+
+**Core (must-ship):**
+- [x] C1 — SQLite schema / integration contract
+- [ ] C2 — Thread-safe bounded queue
+- [ ] C3 — Custom thread pool
+- [ ] C4 — Fetcher worker
+- [ ] C5 — Parser worker
+- [ ] C6 — SQLite cache layer (upsert + skip-if-seen)
+- [ ] C7 — Crawler orchestrator + graceful shutdown
+- [ ] C8 — Politeness (robots.txt + rate limiting)
+- [ ] C9–C14 — TypeScript CLI: data model, JSONL storage, tree engine, fork, commands, rendering
+- [ ] C15 — Tests + documentation
+
+**Stretch:** recursive crawl with dedup, branch summarization, snapshot+tail loading, WAL mode, packaging.
+
+## License
+
+Released under the [MIT License](LICENSE).
