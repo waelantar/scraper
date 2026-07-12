@@ -56,7 +56,8 @@ The two halves are fully decoupled: they communicate **only** through a shared S
 polyglot-engine/
 ├─ python_engine/          # Python crawler (stdlib only)
 │   ├─ __init__.py
-│   └─ db.py               # SQLite schema + page-cache accessors
+│   ├─ db.py               # SQLite schema + page-cache accessors
+│   └─ bounded_queue.py    # thread-safe bounded MPMC queue (two-condition)
 ├─ ts-cli/                 # TypeScript CLI (Phase 2)
 │   └─ src/
 ├─ data/                   # Generated SQLite database (gitignored)
@@ -93,8 +94,15 @@ python -m python_engine.db
 
 ## Testing
 
-<!-- TODO (Phase C): document how to run the test suite once pytest/unittest is set up. -->
-_Coming soon — test suite in progress._
+The test suite uses **pytest** (a dev dependency only — the crawler itself has zero runtime deps).
+
+```bash
+pip install -r requirements-dev.txt   # first time only
+python -m pytest -v                    # run all tests from the project root
+```
+
+Concurrency is tested for real: the queue suite includes a `maxsize=1` multi-consumer stress test that
+would deadlock (and hang) under a naive single-condition design — a regression guard, not just a happy path.
 
 ## Design Decisions
 
@@ -108,6 +116,8 @@ _Coming soon — test suite in progress._
   - Why an append-only JSONL journal for session state instead of editing records in place?
   - Why per-line checksums and a single-writer lock?
   - Is the "lock-free" queue truly lock-free? What role does the GIL play?
+  - Why does the bounded queue use TWO condition variables on ONE lock instead of a single condition?
+    (What concurrency bug does that prevent, and how did you prove it?)
 
   Write these in your own words. If you can't yet, that means the concept isn't solid — revisit it.
 -->
@@ -124,7 +134,7 @@ _Coming soon — test suite in progress._
 
 **Core (must-ship):**
 - [x] C1 — SQLite schema / integration contract
-- [ ] C2 — Thread-safe bounded queue
+- [x] C2 — Thread-safe bounded queue
 - [ ] C3 — Custom thread pool
 - [ ] C4 — Fetcher worker
 - [ ] C5 — Parser worker
