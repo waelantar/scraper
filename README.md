@@ -57,7 +57,8 @@ polyglot-engine/
 ├─ python_engine/          # Python crawler (stdlib only)
 │   ├─ __init__.py
 │   ├─ db.py               # SQLite schema + page-cache accessors
-│   └─ bounded_queue.py    # thread-safe bounded MPMC queue (two-condition)
+│   ├─ bounded_queue.py    # thread-safe bounded MPMC queue (two-condition)
+│   └─ thread_pool.py      # fixed-size worker pool built on the queue
 ├─ ts-cli/                 # TypeScript CLI (Phase 2)
 │   └─ src/
 ├─ data/                   # Generated SQLite database (gitignored)
@@ -118,6 +119,8 @@ would deadlock (and hang) under a naive single-condition design — a regression
   - Is the "lock-free" queue truly lock-free? What role does the GIL play?
   - Why does the bounded queue use TWO condition variables on ONE lock instead of a single condition?
     (What concurrency bug does that prevent, and how did you prove it?)
+  - Why does the thread pool's `submit()` never hold a lock while calling `put()`? (What deadlock does that
+    avoid under backpressure?) And why are the workers non-daemon?
 
   Write these in your own words. If you can't yet, that means the concept isn't solid — revisit it.
 -->
@@ -135,7 +138,7 @@ would deadlock (and hang) under a naive single-condition design — a regression
 **Core (must-ship):**
 - [x] C1 — SQLite schema / integration contract
 - [x] C2 — Thread-safe bounded queue
-- [ ] C3 — Custom thread pool
+- [x] C3 — Custom thread pool
 - [ ] C4 — Fetcher worker
 - [ ] C5 — Parser worker
 - [ ] C6 — SQLite cache layer (upsert + skip-if-seen)
