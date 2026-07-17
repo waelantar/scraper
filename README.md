@@ -58,7 +58,8 @@ polyglot-engine/
 │   ├─ __init__.py
 │   ├─ db.py               # SQLite schema + page-cache accessors
 │   ├─ bounded_queue.py    # thread-safe bounded MPMC queue (two-condition)
-│   └─ thread_pool.py      # fixed-size worker pool built on the queue
+│   ├─ thread_pool.py      # fixed-size worker pool built on the queue
+│   └─ fetcher.py          # URL fetcher (stdlib urllib) → FetchResult
 ├─ ts-cli/                 # TypeScript CLI (Phase 2)
 │   └─ src/
 ├─ data/                   # Generated SQLite database (gitignored)
@@ -99,11 +100,16 @@ The test suite uses **pytest** (a dev dependency only — the crawler itself has
 
 ```bash
 pip install -r requirements-dev.txt   # first time only
-python -m pytest -v                    # run all tests from the project root
+python -m pytest                       # fast, offline unit tests (network tests skipped by default)
+python -m pytest -m network            # opt in to the live-network integration tests
 ```
 
-Concurrency is tested for real: the queue suite includes a `maxsize=1` multi-consumer stress test that
-would deadlock (and hang) under a naive single-condition design — a regression guard, not just a happy path.
+Two things worth calling out:
+
+- **Concurrency is tested for real.** The queue suite includes a `maxsize=1` multi-consumer stress test that
+  would deadlock (and hang) under a naive single-condition design — a regression guard, not just a happy path.
+- **Network code is tested offline.** The fetcher's unit tests mock the `urllib` boundary, so they're fast,
+  deterministic, and run without internet; a few live smoke tests sit behind a `network` marker that CI skips.
 
 ## Design Decisions
 
@@ -121,6 +127,8 @@ would deadlock (and hang) under a naive single-condition design — a regression
     (What concurrency bug does that prevent, and how did you prove it?)
   - Why does the thread pool's `submit()` never hold a lock while calling `put()`? (What deadlock does that
     avoid under backpressure?) And why are the workers non-daemon?
+  - Why does `fetch()` return a `FetchResult` instead of raising on errors? (How does that simplify the worker
+    threads that call it?) And how do you test network code without hitting the network?
 
   Write these in your own words. If you can't yet, that means the concept isn't solid — revisit it.
 -->
@@ -139,7 +147,7 @@ would deadlock (and hang) under a naive single-condition design — a regression
 - [x] C1 — SQLite schema / integration contract
 - [x] C2 — Thread-safe bounded queue
 - [x] C3 — Custom thread pool
-- [ ] C4 — Fetcher worker
+- [x] C4 — Fetcher worker
 - [ ] C5 — Parser worker
 - [ ] C6 — SQLite cache layer (upsert + skip-if-seen)
 - [ ] C7 — Crawler orchestrator + graceful shutdown
