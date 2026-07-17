@@ -59,7 +59,8 @@ polyglot-engine/
 │   ├─ db.py               # SQLite schema + page-cache accessors
 │   ├─ bounded_queue.py    # thread-safe bounded MPMC queue (two-condition)
 │   ├─ thread_pool.py      # fixed-size worker pool built on the queue
-│   └─ fetcher.py          # URL fetcher (stdlib urllib) → FetchResult
+│   ├─ fetcher.py          # URL fetcher (stdlib urllib) → FetchResult
+│   └─ parser.py           # HTML parser (stdlib html.parser) → ParsedPage
 ├─ ts-cli/                 # TypeScript CLI (Phase 2)
 │   └─ src/
 ├─ data/                   # Generated SQLite database (gitignored)
@@ -129,6 +130,8 @@ Two things worth calling out:
     avoid under backpressure?) And why are the workers non-daemon?
   - Why does `fetch()` return a `FetchResult` instead of raising on errors? (How does that simplify the worker
     threads that call it?) And how do you test network code without hitting the network?
+  - How does the parser resolve links, and what's the difference between a root-relative (`/x`) and a
+    path-relative (`x`) href? Why filter by the resolved URL scheme instead of the raw href?
 
   Write these in your own words. If you can't yet, that means the concept isn't solid — revisit it.
 -->
@@ -148,7 +151,7 @@ Two things worth calling out:
 - [x] C2 — Thread-safe bounded queue
 - [x] C3 — Custom thread pool
 - [x] C4 — Fetcher worker
-- [ ] C5 — Parser worker
+- [x] C5 — Parser worker
 - [ ] C6 — SQLite cache layer (upsert + skip-if-seen)
 - [ ] C7 — Crawler orchestrator + graceful shutdown
 - [ ] C8 — Politeness (robots.txt + rate limiting)
