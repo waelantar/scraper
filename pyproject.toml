@@ -1,6 +1,6 @@
 [tool.pytest.ini_options]
 minversion = "6.0"
-addopts = "-m 'not network'"
+addopts = "-m 'not network' -v"
 markers = [
     "network: marks tests that hit the live internet (skipped in CI)"
 ]
