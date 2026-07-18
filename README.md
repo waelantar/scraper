@@ -56,11 +56,11 @@ The two halves are fully decoupled: they communicate **only** through a shared S
 polyglot-engine/
 ├─ python_engine/          # Python crawler (stdlib only)
 │   ├─ __init__.py
-│   ├─ db.py               # SQLite schema + page-cache accessors
 │   ├─ bounded_queue.py    # thread-safe bounded MPMC queue (two-condition)
 │   ├─ thread_pool.py      # fixed-size worker pool built on the queue
 │   ├─ fetcher.py          # URL fetcher (stdlib urllib) → FetchResult
-│   └─ parser.py           # HTML parser (stdlib html.parser) → ParsedPage
+│   ├─ parser.py           # HTML parser (stdlib html.parser) → ParsedPage
+│   └─ cache.py            # SQLite page cache (schema owner, thread-safe)
 ├─ ts-cli/                 # TypeScript CLI (Phase 2)
 │   └─ src/
 ├─ data/                   # Generated SQLite database (gitignored)
@@ -89,11 +89,8 @@ source .venv/bin/activate
 No `pip install` is required — the crawler uses only the standard library.
 
 ### Run
-```bash
-# Initialize / inspect the SQLite schema:
-python -m python_engine.db
-```
-*(More commands will appear here as the crawler and CLI are built.)*
+The crawler orchestrator (C7) is not wired up yet. For now the pieces are exercised through the test suite;
+runnable commands will appear here as the crawler and CLI come together.
 
 ## Testing
 
@@ -132,6 +129,8 @@ Two things worth calling out:
     threads that call it?) And how do you test network code without hitting the network?
   - How does the parser resolve links, and what's the difference between a root-relative (`/x`) and a
     path-relative (`x`) href? Why filter by the resolved URL scheme instead of the raw href?
+  - How is the SQLite cache made thread-safe when many worker threads write at once? (Why a connection per
+    call instead of one shared connection + lock?) Why must the `pages` schema have a single owning module?
 
   Write these in your own words. If you can't yet, that means the concept isn't solid — revisit it.
 -->
@@ -152,7 +151,7 @@ Two things worth calling out:
 - [x] C3 — Custom thread pool
 - [x] C4 — Fetcher worker
 - [x] C5 — Parser worker
-- [ ] C6 — SQLite cache layer (upsert + skip-if-seen)
+- [x] C6 — SQLite cache layer (upsert + skip-if-seen)
 - [ ] C7 — Crawler orchestrator + graceful shutdown
 - [ ] C8 — Politeness (robots.txt + rate limiting)
 - [ ] C9–C14 — TypeScript CLI: data model, JSONL storage, tree engine, fork, commands, rendering
