@@ -60,7 +60,8 @@ polyglot-engine/
 │   ├─ thread_pool.py      # fixed-size worker pool built on the queue
 │   ├─ fetcher.py          # URL fetcher (stdlib urllib) → FetchResult
 │   ├─ parser.py           # HTML parser (stdlib html.parser) → ParsedPage
-│   └─ cache.py            # SQLite page cache (schema owner, thread-safe)
+│   ├─ cache.py            # SQLite page cache (schema owner, thread-safe)
+│   └─ orchestrator.py     # Crawler: wires it all together (termination + dedup)
 ├─ ts-cli/                 # TypeScript CLI (Phase 2)
 │   └─ src/
 ├─ data/                   # Generated SQLite database (gitignored)
@@ -89,8 +90,24 @@ source .venv/bin/activate
 No `pip install` is required — the crawler uses only the standard library.
 
 ### Run
-The crawler orchestrator (C7) is not wired up yet. For now the pieces are exercised through the test suite;
-runnable commands will appear here as the crawler and CLI come together.
+The crawler runs entirely on the standard library. From the project root:
+
+```python
+from python_engine.orchestrator import Crawler
+
+crawler = Crawler(
+    seed_urls=["https://books.toscrape.com/"],
+    db_path="data/pages.db",
+    num_workers=4,
+    max_depth=1,          # seed + one hop of links
+    same_domain=True,     # stay on books.toscrape.com
+    max_urls=50,          # politeness cap while learning
+)
+crawler.crawl()           # blocks until the frontier is drained
+print(crawler.get_stats())  # {crawled, errors, visited, ...}
+```
+
+Crawled pages land in the SQLite `pages` table, ready for the TypeScript CLI (Phase 2) to read.
 
 ## Testing
 
@@ -131,6 +148,8 @@ Two things worth calling out:
     path-relative (`x`) href? Why filter by the resolved URL scheme instead of the raw href?
   - How is the SQLite cache made thread-safe when many worker threads write at once? (Why a connection per
     call instead of one shared connection + lock?) Why must the `pages` schema have a single owning module?
+  - How does the crawler know when it's *finished*, given that an empty queue doesn't mean done? (Explain the
+    in-flight counter.) Why are `attempted`, `crawled`, and `errors` three separate counters?
 
   Write these in your own words. If you can't yet, that means the concept isn't solid — revisit it.
 -->
@@ -152,7 +171,7 @@ Two things worth calling out:
 - [x] C4 — Fetcher worker
 - [x] C5 — Parser worker
 - [x] C6 — SQLite cache layer (upsert + skip-if-seen)
-- [ ] C7 — Crawler orchestrator + graceful shutdown
+- [x] C7 — Crawler orchestrator + graceful shutdown
 - [ ] C8 — Politeness (robots.txt + rate limiting)
 - [ ] C9–C14 — TypeScript CLI: data model, JSONL storage, tree engine, fork, commands, rendering
 - [ ] C15 — Tests + documentation
