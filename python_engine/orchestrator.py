@@ -10,6 +10,7 @@ from python_engine.thread_pool import ThreadPool
 from python_engine.fetcher import fetch, FetchResult
 from python_engine.parser import parse_html, ParsedPage
 from python_engine.cache import PageCache
+from python_engine.politeness import RobotsChecker, DomainRateLimiter
 
 logger = logging.getLogger(__name__)
 
@@ -22,6 +23,7 @@ class Crawler:
     - Uses a thread pool for parallel fetching.
     - Detects termination when all URLs are processed and no new ones are found.
     - Handles KeyboardInterrupt for graceful shutdown.
+    - Respects robots.txt and rate-limits per domain (if enabled).
     """
 
     def __init__(
@@ -33,6 +35,11 @@ class Crawler:
         same_domain: bool = True,
         max_urls: Optional[int] = None,
         fetch_fn: Callable[[str], FetchResult] = fetch,
+        respect_robots: bool = True,
+        crawl_delay: float = 1.0,
+        robots_checker: Optional[RobotsChecker] = None,
+        rate_limiter: Optional[DomainRateLimiter] = None,
+        user_agent: str = "MyCrawler/1.0",
     ):
         """
         Args:
@@ -43,6 +50,11 @@ class Crawler:
             same_domain: If True, only crawl URLs from the same domain as seeds.
             max_urls: Maximum URLs to crawl (None = unlimited).
             fetch_fn: Function to fetch a URL (dependency injection for testing).
+            respect_robots: If True, check robots.txt before fetching.
+            crawl_delay: Delay in seconds between requests to the same domain.
+            robots_checker: Optional RobotsChecker instance (for testing).
+            rate_limiter: Optional DomainRateLimiter instance (for testing).
+            user_agent: User-Agent string used for robots.txt checks.
         """
         self.seed_urls = list(seed_urls)
         self.num_workers = num_workers
@@ -50,11 +62,17 @@ class Crawler:
         self.same_domain = same_domain
         self.max_urls = max_urls
         self.fetch_fn = fetch_fn
+        self.respect_robots = respect_robots
+        self.user_agent = user_agent
 
         # Components
         self.cache = PageCache(db_path)
         self.url_queue = BoundedQueue(maxsize=None)  # unbounded
         self.pool = ThreadPool(num_workers=num_workers)
+
+        # Politeness components (default to real, but allow injection)
+        self.robots_checker = robots_checker or RobotsChecker(user_agent=user_agent)
+        self.rate_limiter = rate_limiter or DomainRateLimiter(delay=crawl_delay)
 
         # Termination detection
         self._active_tasks = 0
@@ -78,6 +96,7 @@ class Crawler:
         self._attempted = 0         # URLs reserved for processing (used for max_urls)
         self.crawled_count = 0      # URLs successfully fetched + parsed
         self.error_count = 0        # URLs that failed during fetch/parse
+        self.skipped_count = 0      # URLs skipped due to robots.txt disallow
 
     def crawl(self) -> None:
         """Start the crawling process and block until complete."""
@@ -148,7 +167,20 @@ class Crawler:
         if self.cache.has(url):
             return
 
-        # 2. Fetch
+        domain = urlparse(url).netloc
+
+        # 2. Robots.txt check (if enabled)
+        if self.respect_robots:
+            if not self.robots_checker.can_fetch(url):
+                logger.debug(f"Skipping {url} (robots.txt disallows)")
+                with self._active_cond:
+                    self.skipped_count += 1
+                return
+
+        # 3. Rate limiting (per-domain sleep)
+        self.rate_limiter.wait_if_needed(domain)
+
+        # 4. Fetch
         fetch_result = self.fetch_fn(url)
         if fetch_result.status_code != 200 or fetch_result.html is None:
             # Store the failure (so we don't retry)
@@ -159,16 +191,16 @@ class Crawler:
             logger.debug(f"Failed to fetch {url}: {fetch_result.error}")
             return
 
-        # 3. Parse
+        # 5. Parse
         parsed = parse_html(url, fetch_result.html)
 
-        # 4. Store in cache (with status code from fetch)
+        # 6. Store in cache (with status code from fetch)
         self.cache.put(parsed, status_code=fetch_result.status_code)
         with self._active_cond:
             self.crawled_count += 1
         logger.info(f"Crawled {url} (depth {depth}) - {len(parsed.links)} links found")
 
-        # 5. Enqueue new links
+        # 7. Enqueue new links
         if self.max_depth is None or depth < self.max_depth:
             for link in parsed.links:
                 # Domain filter
@@ -242,7 +274,8 @@ class Crawler:
         with self._active_cond:
             logger.info(
                 f"Crawler shut down. Attempted: {self._attempted}, "
-                f"Crawled: {self.crawled_count}, Errors: {self.error_count}"
+                f"Crawled: {self.crawled_count}, Errors: {self.error_count}, "
+                f"Skipped (robots): {self.skipped_count}"
             )
 
     def get_stats(self) -> dict:
@@ -252,6 +285,7 @@ class Crawler:
                 "attempted": self._attempted,
                 "crawled": self.crawled_count,
                 "errors": self.error_count,
+                "skipped_robots": self.skipped_count,
                 "visited": len(self._visited),
                 "queue_size": len(self.url_queue),
                 "active_tasks": self._active_tasks,
