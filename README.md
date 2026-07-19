@@ -61,7 +61,8 @@ polyglot-engine/
 │   ├─ fetcher.py          # URL fetcher (stdlib urllib) → FetchResult
 │   ├─ parser.py           # HTML parser (stdlib html.parser) → ParsedPage
 │   ├─ cache.py            # SQLite page cache (schema owner, thread-safe)
-│   └─ orchestrator.py     # Crawler: wires it all together (termination + dedup)
+│   ├─ orchestrator.py     # Crawler: wires it all together (termination + dedup)
+│   └─ politeness.py       # robots.txt checker + per-domain rate limiter
 ├─ ts-cli/                 # TypeScript CLI (Phase 2)
 │   └─ src/
 ├─ data/                   # Generated SQLite database (gitignored)
@@ -102,6 +103,8 @@ crawler = Crawler(
     max_depth=1,          # seed + one hop of links
     same_domain=True,     # stay on books.toscrape.com
     max_urls=50,          # politeness cap while learning
+    respect_robots=True,  # obey robots.txt (fetched once per domain)
+    crawl_delay=1.0,      # seconds to wait between requests to the same domain
 )
 crawler.crawl()           # blocks until the frontier is drained
 print(crawler.get_stats())  # {crawled, errors, visited, ...}
@@ -150,6 +153,13 @@ Two things worth calling out:
     call instead of one shared connection + lock?) Why must the `pages` schema have a single owning module?
   - How does the crawler know when it's *finished*, given that an empty queue doesn't mean done? (Explain the
     in-flight counter.) Why are `attempted`, `crawled`, and `errors` three separate counters?
+  - What happens when `robots.txt` can't be fetched — do you crawl or not, and why? (What does an *unread*
+    `RobotFileParser` return, and how did that turn your intended "fail-open" into "fail-closed"?)
+  - Why does robots.txt matching use only the product token of your `User-Agent` (the part before the `/`), and
+    why does `Disallow: /admin/` not block a bare `/admin`?
+  - How is the per-domain rate limiter kept correct under many worker threads without holding a lock across the
+    `sleep`? (Explain reserving the slot atomically, then sleeping outside the lock.) And why is rate limiting
+    independent of `respect_robots`?
 
   Write these in your own words. If you can't yet, that means the concept isn't solid — revisit it.
 -->
@@ -172,7 +182,7 @@ Two things worth calling out:
 - [x] C5 — Parser worker
 - [x] C6 — SQLite cache layer (upsert + skip-if-seen)
 - [x] C7 — Crawler orchestrator + graceful shutdown
-- [ ] C8 — Politeness (robots.txt + rate limiting)
+- [x] C8 — Politeness (robots.txt + rate limiting)
 - [ ] C9–C14 — TypeScript CLI: data model, JSONL storage, tree engine, fork, commands, rendering
 - [ ] C15 — Tests + documentation
 
