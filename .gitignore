@@ -20,3 +20,7 @@ Thumbs.db
 
 #vscode
 .vscode/
+
+#ts related stuff
+node_modules/
+dist/

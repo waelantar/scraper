@@ -63,8 +63,12 @@ polyglot-engine/
 │   ├─ cache.py            # SQLite page cache (schema owner, thread-safe)
 │   ├─ orchestrator.py     # Crawler: wires it all together (termination + dedup)
 │   └─ politeness.py       # robots.txt checker + per-domain rate limiter
-├─ ts-cli/                 # TypeScript CLI (Phase 2)
+├─ ts-cli/                 # TypeScript CLI (Phase 2) — ESM, Node 20+
+│   ├─ package.json        # tsx (dev) + tsc (build) scripts, "type": "module"
+│   ├─ tsconfig.json       # NodeNext, strict
 │   └─ src/
+│       ├─ index.ts        # entry point (stub)
+│       └─ smoke.ts        # cross-language check: reads the Python-written SQLite
 ├─ data/                   # Generated SQLite database (gitignored)
 │   └─ .gitkeep
 ├─ tests/                  # Test suite
@@ -160,6 +164,14 @@ Two things worth calling out:
   - How is the per-domain rate limiter kept correct under many worker threads without holding a lock across the
     `sleep`? (Explain reserving the slot atomically, then sleeping outside the lock.) And why is rate limiting
     independent of `respect_robots`?
+  - The crawler *owns* the `pages` schema; the CLI only *reads* it. Why does the TypeScript smoke test assert
+    the schema (check the table + columns, exit loudly on mismatch) instead of running `CREATE TABLE IF NOT
+    EXISTS` itself? (What silent drift does a second `CREATE` invite?)
+  - Why is a green `tsx` run not proof the code is correct? (What does `tsx` skip that the `tsc` build enforces,
+    and which one would CI trust?) And why does ESM need `"type": "module"` in `package.json` on top of the
+    `tsconfig` `module` setting?
+  - Why read the SQLite file with the built-in `node:sqlite` (experimental) rather than `better-sqlite3`?
+    What's the trade-off, and when would you switch?
 
   Write these in your own words. If you can't yet, that means the concept isn't solid — revisit it.
 -->
@@ -183,6 +195,7 @@ Two things worth calling out:
 - [x] C6 — SQLite cache layer (upsert + skip-if-seen)
 - [x] C7 — Crawler orchestrator + graceful shutdown
 - [x] C8 — Politeness (robots.txt + rate limiting)
+- [x] CROSS — TypeScript reads the Python-written SQLite (cross-language contract proven end-to-end)
 - [ ] C9–C14 — TypeScript CLI: data model, JSONL storage, tree engine, fork, commands, rendering
 - [ ] C15 — Tests + documentation
 
