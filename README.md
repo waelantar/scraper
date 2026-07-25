@@ -196,7 +196,8 @@ Two things worth calling out:
 - [x] C7 — Crawler orchestrator + graceful shutdown
 - [x] C8 — Politeness (robots.txt + rate limiting)
 - [x] CROSS — TypeScript reads the Python-written SQLite (cross-language contract proven end-to-end)
-- [ ] C9–C14 — TypeScript CLI: data model, JSONL storage, tree engine, fork, commands, rendering
+- [x] C9 — TypeScript data model (discriminated-union entry types + type-level tests)
+- [ ] C10–C14 — TypeScript CLI: JSONL storage, tree engine, fork, commands, rendering
 - [ ] C15 — Tests + documentation
 
 **Stretch:** recursive crawl with dedup, branch summarization, snapshot+tail loading, WAL mode, packaging.
