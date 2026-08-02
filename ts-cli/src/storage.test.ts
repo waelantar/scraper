@@ -1,7 +1,7 @@
 import { describe, it, before, after } from 'node:test';
 import assert from 'node:assert';
 import { mkdtemp, rm, readFile, writeFile } from 'node:fs/promises';
-import { existsSync } from 'fs';
+import { existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { JsonlStorage } from './storage.js';
@@ -46,8 +46,10 @@ describe('JsonlStorage', () => {
         ];
 
         for (const e of entries) {
-            const id = storage.append(e);
-            assert.strictEqual(id, e.id);
+            const persisted = storage.append(e);
+            assert.strictEqual(persisted.id, e.id);
+            // Checksum should be filled
+            assert.ok(persisted.checksum.length > 0);
         }
 
         const map = storage.load();
@@ -182,21 +184,18 @@ describe('JsonlStorage', () => {
 
     it('removes stale lock', async () => {
         const path = join(tempDir, 'stale.jsonl');
-        const storage1 = new JsonlStorage(path, 10); // 10ms stale threshold
+        const storage1 = new JsonlStorage(path, 10);
         storage1.lock();
 
-        // Wait >10ms so the lock becomes stale
         await new Promise(resolve => setTimeout(resolve, 20));
 
         const storage2 = new JsonlStorage(path, 10);
-        // Should not throw; should remove stale lock
         storage2.lock();
         assert.ok(existsSync(path + '.lock'));
         storage2.unlock();
     });
 
     it('append failure releases lock', () => {
-        // Simulate failure by using a path to a non-existent directory
         const invalidPath = '/non/existent/dir/file.jsonl';
         const storage = new JsonlStorage(invalidPath);
         const entry = makeMessage('msg1', null, 'Hello');
@@ -204,8 +203,6 @@ describe('JsonlStorage', () => {
             storage.append(entry);
             assert.fail('Should have thrown');
         } catch (_) {
-            // Expected error
-            // Lock should be released
             assert.strictEqual(storage['locked'], false);
         }
     });
