@@ -135,7 +135,7 @@ Two things worth calling out:
 
 - **The TypeScript storage gate is separate from the runner.** `npm.cmd run type-check` and
   `npm.cmd run build` both pass for C10. The compiled suite also passes with Node's native runner
-  (`node --test dist\*.test.js`): 13 tests across the storage and data-model suites.
+  (`node --test dist\*.test.js`): 19 tests across the storage, tree, and data-model suites.
 
 ## Design Decisions
 
@@ -153,6 +153,12 @@ line hashes the serialized payload with `checksum` excluded; loading stops at th
 line and truncates the remaining tail. A per-journal lock file created with the exclusive `wx` flag prevents
 concurrent writers, and an age threshold provides a recovery path for locks left by a crashed process.
 
+The tree engine keeps the flat journal useful by indexing entries by ID and following `parentId` links from the
+persisted leaf to the root. A `leaf` entry records navigation explicitly, so reload does not confuse the latest
+physical line with the current conversation position. `buildContext` is a pure projection of that path: it
+filters the lineage to messages, rejects missing parents, and detects cycles instead of hanging on corrupt data.
+`append()` returns the checksummed entry so the in-memory index and the durable JSONL record stay identical.
+
 ## What I Learned
 
 - A checksum must exclude itself from the hashed payload, and append/load must use the same serialization
@@ -164,6 +170,13 @@ concurrent writers, and an age threshold provides a recovery path for locks left
 - `tsx` executes stripped TypeScript but does not replace `tsc`. When the local `tsx` launcher failed before
   loading tests with `uv_os_get_passwd returned ENOMEM`, the compiled JavaScript was still verified with Node's
   native test runner.
+- A persisted leaf is an event, not an assumption about file order. Replaying the latest `leaf.targetId` keeps
+  a branch jump durable even when later lines belong to another physical branch.
+- Parent links need a visited set. A missing parent is a clear corruption error; a cycle must also fail clearly
+  instead of turning a path reconstruction into an infinite loop.
+- When a storage method returns a transformed record, callers should retain that returned record. Keeping the
+  original entry with an empty checksum created an in-memory/disk mismatch, so C11 changed `append()` to return
+  the checksummed entry.
 
 ## Roadmap
 
@@ -179,7 +192,8 @@ concurrent writers, and an age threshold provides a recovery path for locks left
 - [x] CROSS — TypeScript reads the Python-written SQLite (cross-language contract proven end-to-end)
 - [x] C9 — TypeScript data model (discriminated-union entry types + type-level tests)
 - [x] C10 — TypeScript JSONL storage (checksums, crash-tail truncation, single-writer lock)
-- [ ] C11–C14 — TypeScript CLI: tree engine, fork, commands, rendering
+- [x] C11 — Tree engine (path reconstruction, persisted leaf, context projection)
+- [ ] C12–C14 — TypeScript CLI: fork, commands, rendering
 - [ ] C15 — Tests + documentation
 
 **Stretch:** recursive crawl with dedup, branch summarization, snapshot+tail loading, WAL mode, packaging.
