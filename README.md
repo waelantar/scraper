@@ -133,56 +133,37 @@ Two things worth calling out:
 - **Network code is tested offline.** The fetcher's unit tests mock the `urllib` boundary, so they're fast,
   deterministic, and run without internet; a few live smoke tests sit behind a `network` marker that CI skips.
 
+- **The TypeScript storage gate is separate from the runner.** `npm.cmd run type-check` and
+  `npm.cmd run build` both pass for C10. The compiled suite also passes with Node's native runner
+  (`node --test dist\*.test.js`): 13 tests across the storage and data-model suites.
+
 ## Design Decisions
 
-<!--
-  TODO — WRITE THIS YOURSELF. This section is the most valuable part of the README for a portfolio,
-  and it's your interview prep. For each decision, write 2-3 sentences on WHY you made it and what the
-  alternative was. Prompts to answer:
+The crawler owns the SQLite schema because it is the producer of that contract; the TypeScript side only
+validates and reads it. Using the URL as the page primary key makes deduplication and upserts express the
+domain identity directly, while SQLite keeps the two processes decoupled without introducing an API server.
 
-  - Why is `url` the PRIMARY KEY of the pages table (instead of a surrogate auto-increment id)?
-  - Why SQLite as the boundary between the two processes, rather than a REST API or a JSON file?
-  - Why an append-only JSONL journal for session state instead of editing records in place?
-  - Why per-line checksums and a single-writer lock?
-  - Is the "lock-free" queue truly lock-free? What role does the GIL play?
-  - Why does the bounded queue use TWO condition variables on ONE lock instead of a single condition?
-    (What concurrency bug does that prevent, and how did you prove it?)
-  - Why does the thread pool's `submit()` never hold a lock while calling `put()`? (What deadlock does that
-    avoid under backpressure?) And why are the workers non-daemon?
-  - Why does `fetch()` return a `FetchResult` instead of raising on errors? (How does that simplify the worker
-    threads that call it?) And how do you test network code without hitting the network?
-  - How does the parser resolve links, and what's the difference between a root-relative (`/x`) and a
-    path-relative (`x`) href? Why filter by the resolved URL scheme instead of the raw href?
-  - How is the SQLite cache made thread-safe when many worker threads write at once? (Why a connection per
-    call instead of one shared connection + lock?) Why must the `pages` schema have a single owning module?
-  - How does the crawler know when it's *finished*, given that an empty queue doesn't mean done? (Explain the
-    in-flight counter.) Why are `attempted`, `crawled`, and `errors` three separate counters?
-  - What happens when `robots.txt` can't be fetched — do you crawl or not, and why? (What does an *unread*
-    `RobotFileParser` return, and how did that turn your intended "fail-open" into "fail-closed"?)
-  - Why does robots.txt matching use only the product token of your `User-Agent` (the part before the `/`), and
-    why does `Disallow: /admin/` not block a bare `/admin`?
-  - How is the per-domain rate limiter kept correct under many worker threads without holding a lock across the
-    `sleep`? (Explain reserving the slot atomically, then sleeping outside the lock.) And why is rate limiting
-    independent of `respect_robots`?
-  - The crawler *owns* the `pages` schema; the CLI only *reads* it. Why does the TypeScript smoke test assert
-    the schema (check the table + columns, exit loudly on mismatch) instead of running `CREATE TABLE IF NOT
-    EXISTS` itself? (What silent drift does a second `CREATE` invite?)
-  - Why is a green `tsx` run not proof the code is correct? (What does `tsx` skip that the `tsc` build enforces,
-    and which one would CI trust?) And why does ESM need `"type": "module"` in `package.json` on top of the
-    `tsconfig` `module` setting?
-  - Why read the SQLite file with the built-in `node:sqlite` (experimental) rather than `better-sqlite3`?
-    What's the trade-off, and when would you switch?
+The crawler's queue uses condition variables for real blocking and backpressure. It is not truly lock-free:
+the GIL may make individual deque operations atomic in CPython, but coordination and shutdown still require
+synchronization. The crawler also tracks in-flight work separately from queue emptiness, because a worker can
+still enqueue children after it removes the last current URL.
 
-  Write these in your own words. If you can't yet, that means the concept isn't solid — revisit it.
--->
+The session journal is append-only JSONL so a new state transition does not rewrite the entire history. Each
+line hashes the serialized payload with `checksum` excluded; loading stops at the first malformed or mismatched
+line and truncates the remaining tail. A per-journal lock file created with the exclusive `wx` flag prevents
+concurrent writers, and an age threshold provides a recovery path for locks left by a crashed process.
 
 ## What I Learned
 
-<!--
-  TODO — WRITE THIS YOURSELF as you go. A short, honest list of the concepts this project taught you
-  (concurrency, the GIL, append-only logs, crash safety, TDD, git workflow...). Recruiters love this
-  section; it signals self-awareness and growth.
--->
+- A checksum must exclude itself from the hashed payload, and append/load must use the same serialization
+  shape or every reload becomes a false corruption.
+- A partial JSONL tail must be truncated at a UTF-8 byte offset, not a JavaScript character offset; otherwise
+  multibyte content can make recovery cut the valid prefix incorrectly.
+- A lock test needs two storage instances. Locking twice through one instance only tests that the method is
+  idempotent, not that another writer is excluded.
+- `tsx` executes stripped TypeScript but does not replace `tsc`. When the local `tsx` launcher failed before
+  loading tests with `uv_os_get_passwd returned ENOMEM`, the compiled JavaScript was still verified with Node's
+  native test runner.
 
 ## Roadmap
 
@@ -197,7 +178,8 @@ Two things worth calling out:
 - [x] C8 — Politeness (robots.txt + rate limiting)
 - [x] CROSS — TypeScript reads the Python-written SQLite (cross-language contract proven end-to-end)
 - [x] C9 — TypeScript data model (discriminated-union entry types + type-level tests)
-- [ ] C10–C14 — TypeScript CLI: JSONL storage, tree engine, fork, commands, rendering
+- [x] C10 — TypeScript JSONL storage (checksums, crash-tail truncation, single-writer lock)
+- [ ] C11–C14 — TypeScript CLI: tree engine, fork, commands, rendering
 - [ ] C15 — Tests + documentation
 
 **Stretch:** recursive crawl with dedup, branch summarization, snapshot+tail loading, WAL mode, packaging.
