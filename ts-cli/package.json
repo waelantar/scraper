@@ -4,6 +4,7 @@
   "type": "module",
   "scripts": {
     "dev": "tsx src/index.ts",
+    "cli": "tsx src/index.ts",
     "smoke": "tsx src/smoke.ts",
     "test": "tsx --test src/**/*.test.ts",
     "type-check": "tsc --noEmit",

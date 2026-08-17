@@ -16,18 +16,17 @@ export interface BaseEntry {
     checksum: string;
 }
 
-/** A user or assistant message */
+/** A user, assistant, or tool message */
 export interface MessageEntry extends BaseEntry {
     type: 'message';
     role: 'user' | 'assistant' | 'tool';
     content: string;
-    // optional: tool calls, tool results, etc. (add later)
 }
 
 /** A persisted leaf move (where the conversation pointer is) */
 export interface LeafEntry extends BaseEntry {
     type: 'leaf';
-    targetId: string;   // points to the entry that is now the leaf
+    targetId: string;
 }
 
 /** A compaction boundary (context‑window summary) */
@@ -41,9 +40,9 @@ export interface CompactionEntry extends BaseEntry {
 /** A summary of an abandoned branch */
 export interface BranchSummaryEntry extends BaseEntry {
     type: 'branch_summary';
-    fromId: string;       // where you left
+    fromId: string;
     summary: string;
-    details?: string;     // optional extra info
+    details?: string;
 }
 
 /** A model change (positional config) */
@@ -80,7 +79,7 @@ export interface SessionInfoEntry extends BaseEntry {
 /** Extension‑authored entry */
 export interface CustomEntry extends BaseEntry {
     type: 'custom';
-    payload: unknown;   // extension‑specific
+    payload: unknown;
 }
 
 export type Entry =

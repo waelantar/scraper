@@ -133,9 +133,10 @@ Two things worth calling out:
 - **Network code is tested offline.** The fetcher's unit tests mock the `urllib` boundary, so they're fast,
   deterministic, and run without internet; a few live smoke tests sit behind a `network` marker that CI skips.
 
-- **The TypeScript storage gate is separate from the runner.** `npm.cmd run type-check` and
-  `npm.cmd run build` both pass for C10. The compiled suite also passes with Node's native runner
-  (`node --test dist\*.test.js`): 21 tests across the storage, tree, fork, and data-model suites.
+- **The TypeScript gate is separate from the runner.** `npm.cmd run type-check` and
+  `npm.cmd run build` pass for the storage, tree, fork, and CLI layers. The compiled suite passes with
+  Node's native runner (`node --test dist\*.test.js`): 22 tests across storage, tree, fork, data-model,
+  and REPL integration suites.
 
 ## Design Decisions
 
@@ -165,6 +166,12 @@ copies in order, and persists a new leaf at the copied tip. The original branch 
 deliberate smaller scope than the reference study's new-session-file fork; the current implementation targets
 message paths, while remapping metadata references such as `LabelEntry.targetId` is deferred.
 
+The C13 CLI keeps the interactive layer thin. `index.ts` loads the journal and tree, while `Repl` owns the
+readline loop and dispatches `/query`, `/view`, `/fork`, `/tree`, `/status`, and `/exit`. SQLite queries use
+parameters, messages go through the tree engine's append operation, and the REPL closes both readline and its
+lazy database connection in `finally`. `SESSION_PATH` and `DB_PATH` make the scripted integration test use
+isolated temporary files without changing the normal shared `data/` defaults.
+
 ## What I Learned
 
 - A checksum must exclude itself from the hashed payload, and append/load must use the same serialization
@@ -188,6 +195,12 @@ message paths, while remapping metadata references such as `LabelEntry.targetId`
 - A fork test should verify both sides of the operation: the new branch's context and leaf, and the complete
   original path's IDs/content after the copy. The fork is only correct if the old branch remains independently
   addressable.
+- A CLI integration test must exercise the process boundary, not only call helper methods. The test creates an
+  isolated SQLite cache and journal, drives stdin through the compiled Node entry point, and verifies query,
+  message append, fork, tree output, status, and clean exit together.
+- ES modules do not provide CommonJS `__dirname`; test paths need to derive from `import.meta.url`. A fast child
+  process can also emit `close` before a test attaches its listener, so lifecycle promises must be registered
+  immediately after spawning the process.
 
 ## Roadmap
 
@@ -205,7 +218,8 @@ message paths, while remapping metadata references such as `LabelEntry.targetId`
 - [x] C10 — TypeScript JSONL storage (checksums, crash-tail truncation, single-writer lock)
 - [x] C11 — Tree engine (path reconstruction, persisted leaf, context projection)
 - [x] C12 — Fork (copy path, re-mint IDs, rewrite parents, move leaf)
-- [ ] C13–C14 — TypeScript CLI: commands and tree rendering
+- [x] C13 — Interactive CLI (query, view, fork, tree, status, journal-backed messages)
+- [ ] C14 — Tree render polish (ASCII branches and current-leaf marker)
 - [ ] C15 — Tests + documentation
 
 **Stretch:** recursive crawl with dedup, branch summarization, snapshot+tail loading, WAL mode, packaging.
