@@ -135,7 +135,7 @@ Two things worth calling out:
 
 - **The TypeScript storage gate is separate from the runner.** `npm.cmd run type-check` and
   `npm.cmd run build` both pass for C10. The compiled suite also passes with Node's native runner
-  (`node --test dist\*.test.js`): 19 tests across the storage, tree, and data-model suites.
+  (`node --test dist\*.test.js`): 21 tests across the storage, tree, fork, and data-model suites.
 
 ## Design Decisions
 
@@ -159,6 +159,12 @@ physical line with the current conversation position. `buildContext` is a pure p
 filters the lineage to messages, rejects missing parents, and detects cycles instead of hanging on corrupt data.
 `append()` returns the checksummed entry so the in-memory index and the durable JSONL record stay identical.
 
+Forking is implemented as a same-journal branch operation for Core C12. The engine copies the selected
+root→node path, re-mints every copied ID, rewrites each copied `parentId` through an old→new ID map, appends the
+copies in order, and persists a new leaf at the copied tip. The original branch remains untouched. This is a
+deliberate smaller scope than the reference study's new-session-file fork; the current implementation targets
+message paths, while remapping metadata references such as `LabelEntry.targetId` is deferred.
+
 ## What I Learned
 
 - A checksum must exclude itself from the hashed payload, and append/load must use the same serialization
@@ -177,6 +183,11 @@ filters the lineage to messages, rejects missing parents, and detects cycles ins
 - When a storage method returns a transformed record, callers should retain that returned record. Keeping the
   original entry with an empty checksum created an in-memory/disk mismatch, so C11 changed `append()` to return
   the checksummed entry.
+- Forking is copying plus re-minting, not pointing at the same IDs. Reusing IDs would make the copied branch and
+  original branch collide in the `Map` index and would make later parent traversal ambiguous.
+- A fork test should verify both sides of the operation: the new branch's context and leaf, and the complete
+  original path's IDs/content after the copy. The fork is only correct if the old branch remains independently
+  addressable.
 
 ## Roadmap
 
@@ -193,7 +204,8 @@ filters the lineage to messages, rejects missing parents, and detects cycles ins
 - [x] C9 — TypeScript data model (discriminated-union entry types + type-level tests)
 - [x] C10 — TypeScript JSONL storage (checksums, crash-tail truncation, single-writer lock)
 - [x] C11 — Tree engine (path reconstruction, persisted leaf, context projection)
-- [ ] C12–C14 — TypeScript CLI: fork, commands, rendering
+- [x] C12 — Fork (copy path, re-mint IDs, rewrite parents, move leaf)
+- [ ] C13–C14 — TypeScript CLI: commands and tree rendering
 - [ ] C15 — Tests + documentation
 
 **Stretch:** recursive crawl with dedup, branch summarization, snapshot+tail loading, WAL mode, packaging.
