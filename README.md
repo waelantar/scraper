@@ -3,10 +3,13 @@
 > A multithreaded web crawler built in **pure Python (standard library only)** feeding a **TypeScript agent terminal**
 > with a crash-safe, append-only **branching session tree**. Two runtimes, one SQLite contract.
 
-<!-- CI badge goes here once GitHub Actions is set up (Phase D):
-[![CI](https://github.com/<you>/polyglot-engine/actions/workflows/ci.yml/badge.svg)](../../actions) -->
+![Polyglot Engine terminal illustration](assets/polyglot-crawler-branching-terminal-banner.png)
 
-**Status:** 🚧 In active development — see the [Roadmap](#roadmap).
+**Status:** ✅ Completed learning build. The core crawler, branching research terminal, launchers, documentation,
+and verification gate are finished. It remains intentionally small and is not presented as a production crawling
+platform.
+
+**Build story:** [I Built a Terminal Research Agent From a Web Crawler — Here’s the Debugging Trail I Refused to Edit Out](https://medium.com/@antarwael189/i-built-a-terminal-research-agent-from-a-web-crawler-heres-the-debugging-trail-i-refused-to-edit-7674343142fc)
 
 ---
 
@@ -42,6 +45,17 @@ The two halves are fully decoupled: they communicate **only** through a shared S
                     \________ SQLite is the only integration point ________/
 ```
 
+## In action
+
+The project ships with the screenshots used in the published build story. They show the actual terminal surface,
+branching workflow, and verification gate rather than a mocked interface.
+
+![Agent terminal commands](<assets/1 terminal instead of tour of runtimes.jpg>)
+
+![SQLite page preview, persisted note, and branch tree](<assets/the failure cases that changed the design.jpg>)
+
+![Offline Python verification gate](<assets/test runner was not a type check.jpg>)
+
 ## Tech Stack
 
 | Side | Stack | Notable constraint |
@@ -63,16 +77,23 @@ polyglot-engine/
 │   ├─ cache.py            # SQLite page cache (schema owner, thread-safe)
 │   ├─ orchestrator.py     # Crawler: wires it all together (termination + dedup)
 │   └─ politeness.py       # robots.txt checker + per-domain rate limiter
-├─ ts-cli/                 # TypeScript CLI (Phase 2) — ESM, Node 20+
+├─ ts-cli/                 # TypeScript agent terminal — ESM, Node 22+
 │   ├─ package.json        # tsx (dev) + tsc (build) scripts, "type": "module"
 │   ├─ tsconfig.json       # NodeNext, strict
 │   └─ src/
-│       ├─ index.ts        # entry point (stub)
-│       └─ smoke.ts        # cross-language check: reads the Python-written SQLite
+│       ├─ agent.ts        # terminal entry point
+│       ├─ agent-console.ts # crawl/search/open/note/branch/tree UI
+│       ├─ storage.ts      # checksummed append-only JSONL storage
+│       └─ tree*.ts        # tree engine and deterministic renderer
 ├─ data/                   # Generated SQLite database (gitignored)
 │   └─ .gitkeep
 ├─ tests/                  # Test suite
-├─ .github/workflows/      # CI (Phase D)
+├─ assets/                 # Terminal banner and project screenshots
+├─ polyglot.cmd             # Windows one-command launcher
+├─ polyglot                 # macOS/Linux one-command launcher
+├─ MEDIUM_ARTICLE_DRAFT.md  # Source for the published build story
+├─ MEDIUM_SCREENSHOT_CHECKLIST.md
+├─ tools/Export-Medium.ps1 # Generates the rich-text paste-ready article
 ├─ README.md
 └─ LICENSE
 ```
@@ -100,9 +121,9 @@ The **Polyglot Engine** terminal opens with a command prompt. It dispatches craw
 the SQLite cache plus branching journal through TypeScript, without requiring you to change terminals.
 
 ```text
-crawl https://books.toscrape.com/ --max-depth 1 --max-urls 20
-search travel
-open <a URL returned by search>
+crawl https://books.toscrape.com/ --max-depth 1 --max-urls 20 --db-path data/books-demo.db
+search Himalayas
+open https://books.toscrape.com/catalogue/category/books/travel_2/index.html
 This category pattern needs a second look.
 tree
 exit
@@ -146,7 +167,7 @@ Two things worth calling out:
 
 - **The TypeScript gate is separate from the runner.** `npm.cmd run type-check` and
   `npm.cmd run build` pass for the storage, tree, fork, CLI, and agent-terminal layers. The compiled suite
-  passes with Node's native runner (`node --test dist\*.test.js`): 34 tests across command parsing, a scripted
+  passes with Node's native runner (`node --test dist\*.test.js`): 38 tests across command parsing, a scripted
   agent-terminal session, storage, tree, fork, data-model, REPL integration, and tree rendering.
 
 ## Design Decisions
@@ -232,7 +253,7 @@ automatically use plain output, allowing the agent flow to be script-tested as w
 - Keeping tree rendering as a pure function makes branch layout easy to test without starting the CLI; the REPL
   can remain responsible only for fetching the entries and printing the result.
 
-## Roadmap
+## Completion checklist
 
 **Core (must-ship):**
 - [x] C1 — SQLite schema / integration contract
@@ -250,9 +271,12 @@ automatically use plain output, allowing the agent flow to be script-tested as w
 - [x] C12 — Fork (copy path, re-mint IDs, rewrite parents, move leaf)
 - [x] C13 — Interactive CLI (query, view, fork, tree, status, journal-backed messages)
 - [x] C14 — Tree render (ASCII branches, orphan roots, chronological siblings, current-leaf marker)
-- [ ] C15 — Tests + documentation
+- [x] C15 — Tests + documentation
 
-**Stretch:** recursive crawl with dedup, branch summarization, snapshot+tail loading, WAL mode, packaging.
+## Future ideas
+
+These are deliberately outside the completed learning build: browser rendering for JavaScript-heavy sites,
+distributed scheduling, snapshot-plus-tail journal loading, branch summaries, WAL tuning, and package publishing.
 
 ## License
 

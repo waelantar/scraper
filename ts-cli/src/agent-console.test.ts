@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { parseAgentCommand, renderBanner } from './agent-console.js';
+import { describeCrawlerRun, normalizeTerminalText, parseAgentCommand, parseCrawlerStats, renderBanner } from './agent-console.js';
 
 describe('AgentConsole command parser', () => {
     it('routes crawler work to the Python-facing command', () => {
@@ -41,5 +41,49 @@ describe('AgentConsole banner', () => {
         const banner = renderBanner();
         assert.match(banner, /████/);
         assert.match(banner, /crawl, search, investigate, branch/);
+    });
+});
+
+describe('Terminal display text', () => {
+    it('collapses source HTML title whitespace into one result row', () => {
+        assert.equal(normalizeTerminalText('Travel | \n     Books to Scrape - Sandbox'), 'Travel | Books to Scrape - Sandbox');
+    });
+});
+
+describe('Crawler terminal outcome', () => {
+    const stats = JSON.stringify({
+        attempted: 1,
+        crawled: 0,
+        errors: 1,
+        skipped_robots: 0,
+        visited: 1,
+        queue_size: 0,
+        active_tasks: 0,
+    }, null, 2);
+
+    it('reads the Python crawler statistics from mixed log output', () => {
+        assert.deepEqual(parseCrawlerStats(`All tasks complete\n${stats}\nCrawler shut down.`), {
+            attempted: 1,
+            crawled: 0,
+            errors: 1,
+            skipped_robots: 0,
+        });
+    });
+
+    it('reports fetch errors even when the crawler process exits normally', () => {
+        assert.deepEqual(describeCrawlerRun(0, stats), {
+            state: 'partial',
+            result: 'Crawler completed with 1 fetch error and 0 new pages.',
+            guidance: 'Open the seed URL to inspect the cached response and status code.',
+        });
+    });
+
+    it('explains a no-op cache hit instead of presenting it as a fresh crawl', () => {
+        const cached = JSON.stringify({ attempted: 1, crawled: 0, errors: 0, skipped_robots: 0 });
+        assert.deepEqual(describeCrawlerRun(0, cached), {
+            state: 'cached',
+            result: 'Crawler finished — no new pages were fetched.',
+            guidance: 'The seed may already be cached; use a new --db-path to crawl it again.',
+        });
     });
 });

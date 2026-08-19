@@ -9,6 +9,19 @@ import { renderTree } from './tree-renderer.js';
 
 type Output = (text: string) => void;
 
+interface CrawlerStats {
+    attempted: number;
+    crawled: number;
+    errors: number;
+    skipped_robots: number;
+}
+
+export interface CrawlerRunOutcome {
+    state: 'success' | 'partial' | 'cached' | 'robots' | 'failed';
+    result: string;
+    guidance: string;
+}
+
 export type AgentCommand =
     | { kind: 'crawl'; seed: string; options: string[] }
     | { kind: 'query'; search: string }
@@ -42,6 +55,95 @@ function paint(text: string, ...styles: string[]): string {
 
 function rule(): string {
     return paint('─'.repeat(70), colors.dim);
+}
+
+function pluralize(count: number, noun: string): string {
+    return `${count} ${noun}${count === 1 ? '' : 's'}`;
+}
+
+/** Keep HTML title whitespace from breaking terminal result rows. */
+export function normalizeTerminalText(text: string): string {
+    return text.replace(/\s+/g, ' ').trim();
+}
+
+/**
+ * Extract the final stats object emitted by `python -m python_engine crawl`.
+ * Crawler logs are streamed live, so parsing happens from the full captured
+ * output only after the child process exits.
+ */
+export function parseCrawlerStats(output: string): CrawlerStats | null {
+    const match = output.match(/\{\s*"attempted"\s*:\s*\d+[\s\S]*?\}/);
+    if (!match) return null;
+
+    try {
+        const value = JSON.parse(match[0]) as Partial<CrawlerStats>;
+        if (
+            typeof value.attempted !== 'number'
+            || typeof value.crawled !== 'number'
+            || typeof value.errors !== 'number'
+            || typeof value.skipped_robots !== 'number'
+        ) {
+            return null;
+        }
+        return {
+            attempted: value.attempted,
+            crawled: value.crawled,
+            errors: value.errors,
+            skipped_robots: value.skipped_robots,
+        };
+    } catch {
+        return null;
+    }
+}
+
+/** Return a user-facing outcome based on both process status and crawl stats. */
+export function describeCrawlerRun(exitCode: number, output: string): CrawlerRunOutcome {
+    if (exitCode !== 0) {
+        return {
+            state: 'failed',
+            result: `Crawler exited with code ${exitCode}`,
+            guidance: 'Read the crawler output above, correct the problem, then try again.',
+        };
+    }
+
+    const stats = parseCrawlerStats(output);
+    if (!stats) {
+        return {
+            state: 'success',
+            result: 'Crawler finished',
+            guidance: 'Try search <text> to inspect the cache.',
+        };
+    }
+
+    if (stats.errors > 0) {
+        return {
+            state: 'partial',
+            result: `Crawler completed with ${pluralize(stats.errors, 'fetch error')} and ${pluralize(stats.crawled, 'new page')}.`,
+            guidance: 'Open the seed URL to inspect the cached response and status code.',
+        };
+    }
+
+    if (stats.crawled === 0 && stats.skipped_robots > 0) {
+        return {
+            state: 'robots',
+            result: `Crawler finished — ${pluralize(stats.skipped_robots, 'URL')} blocked by robots.txt.`,
+            guidance: 'Choose an allowed URL or review the site’s crawl rules.',
+        };
+    }
+
+    if (stats.crawled === 0) {
+        return {
+            state: 'cached',
+            result: 'Crawler finished — no new pages were fetched.',
+            guidance: 'The seed may already be cached; use a new --db-path to crawl it again.',
+        };
+    }
+
+    return {
+        state: 'success',
+        result: `Crawler finished — ${pluralize(stats.crawled, 'new page')} cached.`,
+        guidance: 'Try search <text> to inspect the cache.',
+    };
 }
 
 function centeredBoxLine(content: string, ...styles: string[]): string {
@@ -246,8 +348,8 @@ export class AgentConsole {
 
     private showQuickStart(): void {
         this.write([
-            `${paint('Quick start', colors.bold)}  ${paint('crawl https://books.toscrape.com/ --max-depth 1 --max-urls 20', colors.green)}`,
-            `${paint('Then', colors.bold)}         ${paint('search travel  ·  open <url>  ·  write a plain-text observation', colors.dim)}`,
+            `${paint('Quick start', colors.bold)}  ${paint('crawl https://books.toscrape.com/ --max-depth 1 --max-urls 20 --db-path data/books-demo.db', colors.green)}`,
+            `${paint('Then', colors.bold)}         ${paint('search Himalayas  ·  open <url>  ·  write a plain-text observation', colors.dim)}`,
             rule(),
         ].join('\n'));
     }
@@ -282,6 +384,7 @@ export class AgentConsole {
         this.write(paint(`  Python is writing to ${this.dbPath}`, colors.dim));
 
         const args = ['-m', 'python_engine', 'crawl', '--seed', seed, ...options];
+        let crawlerStdout = '';
         const exitCode = await new Promise<number>((resolve, reject) => {
             const child = spawn(this.pythonExecutable, args, {
                 cwd: this.options.projectRoot,
@@ -290,15 +393,24 @@ export class AgentConsole {
                 windowsHide: true,
             });
 
-            child.stdout.on('data', (data: Buffer) => this.writeCrawlerOutput(data.toString()));
-            child.stderr.on('data', (data: Buffer) => this.writeCrawlerOutput(data.toString()));
+            const recordCrawlerOutput = (data: Buffer, captureForStats = false): void => {
+                const raw = data.toString();
+                if (captureForStats) crawlerStdout += raw;
+                this.writeCrawlerOutput(raw);
+            };
+            child.stdout.on('data', (data: Buffer) => recordCrawlerOutput(data, true));
+            child.stderr.on('data', (data: Buffer) => recordCrawlerOutput(data));
             child.once('error', reject);
             child.once('close', (code) => resolve(code ?? 1));
         });
 
-        const marker = exitCode === 0 ? paint('✓', colors.green, colors.bold) : paint('✕', colors.red, colors.bold);
-        const result = exitCode === 0 ? 'Crawler finished' : `Crawler exited with code ${exitCode}`;
-        this.write(`${marker} ${paint(result, colors.bold)} ${paint('Try search <text> to inspect the cache.', colors.dim)}`);
+        const outcome = describeCrawlerRun(exitCode, crawlerStdout);
+        const marker = outcome.state === 'success'
+            ? paint('✓', colors.green, colors.bold)
+            : outcome.state === 'failed'
+                ? paint('✕', colors.red, colors.bold)
+                : paint('!', colors.yellow, colors.bold);
+        this.write(`${marker} ${paint(outcome.result, colors.bold)} ${paint(outcome.guidance, colors.dim)}`);
         this.write(rule());
     }
 
@@ -325,7 +437,7 @@ export class AgentConsole {
 
             this.write(`${paint('✓', colors.green, colors.bold)} ${paint(`${rows.length} cached page${rows.length === 1 ? '' : 's'} found`, colors.bold)} ${paint(`for “${search}”`, colors.dim)}`);
             rows.forEach((row, index) => {
-                this.write(`  ${paint(String(index + 1).padStart(2, '0'), colors.cyan)}  ${row.title || '(untitled)'}`);
+                this.write(`  ${paint(String(index + 1).padStart(2, '0'), colors.cyan)}  ${normalizeTerminalText(row.title || '(untitled)')}`);
                 this.write(`      ${paint(row.url, colors.dim)}`);
             });
             this.write(paint('Tip: open <one of the URLs above>', colors.dim));
@@ -354,7 +466,7 @@ export class AgentConsole {
             const content = page.content || '(empty page content)';
             this.write([
                 `${paint('PAGE PREVIEW', colors.bold, colors.cyan)}  ${paint(String(page.status_code ?? 'unknown'), colors.dim)}`,
-                paint(page.title || '(untitled)', colors.bold),
+                paint(normalizeTerminalText(page.title || '(untitled)'), colors.bold),
                 paint(page.url, colors.dim),
                 rule(),
                 content.slice(0, 1000),

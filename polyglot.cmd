@@ -45,7 +45,10 @@ popd
 exit /b %COMMAND_EXIT%
 
 :check
-"%PYTHON_EXE%" -m pytest -q --basetemp "%PROJECT_ROOT%.test-tmp" -p no:cacheprovider
+rem Keep pytest scratch files out of the OneDrive workspace. A unique OS-temp
+rem path prevents a stale, synced, or locked folder from blocking every test.
+set "TEST_TEMP=%TEMP%\polyglot-engine-tests-%RANDOM%-%RANDOM%"
+"%PYTHON_EXE%" -m pytest -q --basetemp "%TEST_TEMP%" -p no:cacheprovider
 if errorlevel 1 exit /b 1
 pushd "%PROJECT_ROOT%ts-cli" || exit /b 1
 call npm.cmd run type-check

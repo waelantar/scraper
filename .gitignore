@@ -3,7 +3,8 @@
 __pycache__/        # compiled bytecode cache
 *.pyc
 .pytest_cache/      # test runner cache
-# Isolated pytest temporary files created by polyglot.cmd
+# Legacy local pytest folder from older launcher versions. New checks use the
+# operating system temporary directory instead.
 .test-tmp/
 
 # Node (Week 2)

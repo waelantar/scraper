@@ -54,7 +54,10 @@ run_console() {
 
 run_check() {
     python=$(python_executable)
-    "$python" -m pytest -q --basetemp "$project_root/.test-tmp" -p no:cacheprovider
+    # Keep pytest scratch files out of synced project folders. `mktemp` gives
+    # every run an isolated OS-temp directory instead of reusing a stale one.
+    test_temp=$(mktemp -d "${TMPDIR:-/tmp}/polyglot-engine-tests.XXXXXX") || die 'Could not create a temporary pytest directory.'
+    "$python" -m pytest -q --basetemp "$test_temp" -p no:cacheprovider
 
     (
         cd "$project_root/ts-cli"
