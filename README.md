@@ -1,6 +1,6 @@
 # The Polyglot Engine
 
-> A multithreaded web crawler built in **pure Python (standard library only)** feeding a **TypeScript CLI**
+> A multithreaded web crawler built in **pure Python (standard library only)** feeding a **TypeScript agent terminal**
 > with a crash-safe, append-only **branching session tree**. Two runtimes, one SQLite contract.
 
 <!-- CI badge goes here once GitHub Actions is set up (Phase D):
@@ -18,7 +18,7 @@ fundamentals underneath them:
 - A **Python crawler** downloads and parses web pages concurrently using a **hand-built thread pool** and a
   **thread-safe bounded queue** (no `concurrent.futures`, no `requests`, no `scrapy`), caching results in
   SQLite.
-- A **TypeScript CLI** reads that cache and provides an interactive, **forkable** conversation over the
+- A **TypeScript agent terminal** reads that cache and provides an interactive, **forkable** conversation over the
   crawled data. The entire session is stored as an append-only JSONL journal with per-line checksums, so a
   crash mid-write is detected and recovered rather than silently corrupting state.
 
@@ -47,7 +47,7 @@ The two halves are fully decoupled: they communicate **only** through a shared S
 | Side | Stack | Notable constraint |
 |------|-------|--------------------|
 | Crawler | Python 3.11+, **standard library only** | Concurrency primitives are hand-rolled |
-| CLI | TypeScript / Node.js 20+ | Tree & persistence logic self-contained |
+| Agent terminal | TypeScript / Node.js 22+ | Unified terminal UI, SQLite reads, and tree persistence |
 | Shared | SQLite | The integration contract |
 
 ## Project Structure
@@ -81,50 +81,61 @@ polyglot-engine/
 
 ### Prerequisites
 - Python 3.11+
-- Node.js 20+ *(for the CLI, Phase 2)*
+- Node.js 22+ *(the CLI uses Node's built-in SQLite module)*
 
-### Setup
-```bash
-# clone, then from the project root:
-python -m venv .venv
-# Windows:
-.venv\Scripts\activate
-# macOS/Linux:
-source .venv/bin/activate
-```
-No `pip install` is required — the crawler uses only the standard library.
+### One terminal, one product command
 
-### Run
-The crawler runs entirely on the standard library. From the project root:
+From the project root, run the launcher for your platform once to create the virtual environment and install the
+development tools. Then run its short form to open the product directly.
 
-```python
-from python_engine.orchestrator import Crawler
+| Platform | First time | Open the agent terminal |
+|---|---|---|
+| Windows | `.\polyglot.cmd setup` | `.\polyglot.cmd` |
+| macOS / Linux | `sh ./polyglot setup` | `sh ./polyglot` |
 
-crawler = Crawler(
-    seed_urls=["https://books.toscrape.com/"],
-    db_path="data/pages.db",
-    num_workers=4,
-    max_depth=1,          # seed + one hop of links
-    same_domain=True,     # stay on books.toscrape.com
-    max_urls=50,          # politeness cap while learning
-    respect_robots=True,  # obey robots.txt (fetched once per domain)
-    crawl_delay=1.0,      # seconds to wait between requests to the same domain
-)
-crawler.crawl()           # blocks until the frontier is drained
-print(crawler.get_stats())  # {crawled, errors, visited, ...}
+On macOS/Linux, `./polyglot` also works after the file has executable permission (for example,
+`chmod +x polyglot`). The repository keeps this script’s line endings as LF for shell compatibility.
+
+The **Polyglot Engine** terminal opens with a command prompt. It dispatches crawler work to Python and reads
+the SQLite cache plus branching journal through TypeScript, without requiring you to change terminals.
+
+```text
+crawl https://books.toscrape.com/ --max-depth 1 --max-urls 20
+search travel
+open <a URL returned by search>
+This category pattern needs a second look.
+tree
+exit
 ```
 
-Crawled pages land in the SQLite `pages` table, ready for the TypeScript CLI (Phase 2) to read.
+Plain text is saved as a durable research note. `branch <message-id>` copies a path into a new branch;
+`/query`, `/view`, `/fork`, `/tree`, `/status`, and `/exit` remain available as aliases.
+
+To run a crawler without opening the terminal, use the matching launcher:
+
+```powershell
+# Windows
+.\polyglot.cmd crawl --seed "https://books.toscrape.com/" --max-depth 2 --max-urls 100
+
+# macOS / Linux
+sh ./polyglot crawl --seed "https://books.toscrape.com/" --max-depth 2 --max-urls 100
+```
 
 ## Testing
 
-The test suite uses **pytest** (a dev dependency only — the crawler itself has zero runtime deps).
+Run the complete terminal-first verification gate with:
 
-```bash
-pip install -r requirements-dev.txt   # first time only
-python -m pytest                       # fast, offline unit tests (network tests skipped by default)
-python -m pytest -m network            # opt in to the live-network integration tests
+```powershell
+# Windows
+.\polyglot.cmd check
+
+# macOS / Linux
+sh ./polyglot check
 ```
+
+It runs the offline Python suite, TypeScript type-check, a clean TypeScript build, and the compiled Node suite.
+The crawler itself still has zero runtime Python dependencies; `pytest` is a development dependency installed by
+`.\polyglot.cmd setup`.
 
 Two things worth calling out:
 
@@ -134,9 +145,9 @@ Two things worth calling out:
   deterministic, and run without internet; a few live smoke tests sit behind a `network` marker that CI skips.
 
 - **The TypeScript gate is separate from the runner.** `npm.cmd run type-check` and
-  `npm.cmd run build` pass for the storage, tree, fork, and CLI layers. The compiled suite passes with
-  Node's native runner (`node --test dist\*.test.js`): 28 tests across storage, tree, fork, data-model,
-  REPL integration, and tree-renderer suites.
+  `npm.cmd run build` pass for the storage, tree, fork, CLI, and agent-terminal layers. The compiled suite
+  passes with Node's native runner (`node --test dist\*.test.js`): 34 tests across command parsing, a scripted
+  agent-terminal session, storage, tree, fork, data-model, REPL integration, and tree rendering.
 
 ## Design Decisions
 
@@ -177,6 +188,13 @@ missing-parent entries as roots, orders roots and siblings by timestamp with an 
 `├─`/`└─` ASCII connectors. The current leaf receives a `*` marker, while `Repl` only adapts the returned string
 for `/tree`. The reference study recommends flattening single-child chains; that presentation polish is explicitly
 deferred while the core renderer focuses on complete, deterministic tree output.
+
+The agent terminal is a presentation and dispatch layer above those core pieces, not a second implementation of
+them. `agent.ts` starts `AgentConsole`; `crawl <url>` spawns `python -m python_engine crawl` in the project root
+and streams its output back into the same terminal. Search, page preview, notes, forking, tree rendering, and
+status use the existing SQLite and `TreeEngine` contracts. This keeps the product experience unified while the
+language boundary remains explicit and testable. TTY sessions use a coloured wordmark and prompt; piped sessions
+automatically use plain output, allowing the agent flow to be script-tested as well.
 
 ## What I Learned
 

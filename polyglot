@@ -1,0 +1,122 @@
+#!/usr/bin/env sh
+
+# Polyglot Engine's macOS/Linux terminal launcher.
+# Run ./polyglot to open the agent terminal.
+
+set -eu
+
+project_root=$(CDPATH= cd "$(dirname "$0")" && pwd)
+
+die() {
+    printf '%s\n' "Error: $*" >&2
+    exit 1
+}
+
+python_executable() {
+    if [ -n "${PYTHON_EXE:-}" ]; then
+        printf '%s\n' "$PYTHON_EXE"
+    elif [ -x "$project_root/.venv/bin/python" ]; then
+        printf '%s\n' "$project_root/.venv/bin/python"
+    elif command -v python3 >/dev/null 2>&1; then
+        command -v python3
+    else
+        die 'Python 3 was not found. Install Python 3 or set PYTHON_EXE.'
+    fi
+}
+
+run_setup() {
+    bootstrap_python=${PYTHON_EXE:-python3}
+    command -v "$bootstrap_python" >/dev/null 2>&1 || die 'Python 3 was not found. Install Python 3 or set PYTHON_EXE.'
+
+    "$bootstrap_python" -m venv "$project_root/.venv"
+    "$project_root/.venv/bin/python" -m pip install -r "$project_root/requirements-dev.txt"
+    (
+        cd "$project_root/ts-cli"
+        npm ci
+    )
+}
+
+run_crawl() {
+    python=$(python_executable)
+    (
+        cd "$project_root"
+        "$python" -m python_engine crawl "$@"
+    )
+}
+
+run_console() {
+    (
+        cd "$project_root/ts-cli"
+        npm run build
+        node dist/agent.js
+    )
+}
+
+run_check() {
+    python=$(python_executable)
+    "$python" -m pytest -q --basetemp "$project_root/.test-tmp" -p no:cacheprovider
+
+    (
+        cd "$project_root/ts-cli"
+        npm run type-check
+
+        # `dist` is ignored generated output. Rebuilding it from a clean folder
+        # prevents removed source tests from being run as stale JavaScript.
+        dist_dir="$project_root/ts-cli/dist"
+        case "$dist_dir" in
+            "$project_root"/ts-cli/dist) ;;
+            *) die 'Refusing to clean an unexpected build directory.' ;;
+        esac
+        if [ -d "$dist_dir" ]; then
+            rm -rf "$dist_dir"
+        fi
+
+        npm run build
+        node --test dist/*.test.js
+    )
+}
+
+show_help() {
+    cat <<'EOF'
+Polyglot Engine terminal commands
+
+  ./polyglot setup
+  ./polyglot crawl --seed URL [--max-depth N] [--max-urls N]
+  ./polyglot [console|agent]
+  ./polyglot check
+
+First time:
+  ./polyglot setup
+
+Open the agent terminal:
+  ./polyglot
+
+Crawl example:
+  ./polyglot crawl --seed "https://books.toscrape.com/" --max-depth 2 --max-urls 100
+EOF
+}
+
+command=${1:-console}
+case "$command" in
+    setup)
+        run_setup
+        ;;
+    crawl)
+        shift
+        run_crawl "$@"
+        ;;
+    console|agent)
+        run_console
+        ;;
+    check)
+        run_check
+        ;;
+    help|-h|--help)
+        show_help
+        ;;
+    *)
+        printf 'Unknown command: %s\n\n' "$command" >&2
+        show_help
+        exit 2
+        ;;
+esac

@@ -1,0 +1,2 @@
+# Keep the POSIX launcher runnable after checkout on Windows hosts.
+polyglot text eol=lf
