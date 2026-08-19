@@ -66,12 +66,6 @@ export class TreeEngine {
         this.entries.set(persisted.id, persisted);
     }
 
-    /**
-     * Fork a new branch at the given node.
-     * Copies the path from root to node, remints new IDs, appends the copied entries,
-     * and moves the leaf to the new tip.
-     * Returns the new leaf ID.
-     */
     fork(nodeId: string): string {
         const path = this.getPathToRoot(nodeId);
         if (path.length === 0) {
@@ -81,32 +75,41 @@ export class TreeEngine {
         const idMap = new Map<string, string>();
         const newEntries: Entry[] = [];
 
-        // Create copies with new IDs and updated parent references
         for (const entry of path) {
             const newId = `fork-${Date.now()}-${randomUUID().slice(0, 8)}`;
             const newParentId = entry.parentId ? idMap.get(entry.parentId) || null : null;
-            // Copy all fields except id, parentId, checksum (will be recomputed)
             const { id, parentId, checksum, ...rest } = entry;
             const newEntry: Entry = {
                 ...rest,
                 id: newId,
                 parentId: newParentId,
-                checksum: '', // will be recomputed by storage.append
+                checksum: '',
             };
             newEntries.push(newEntry);
             idMap.set(entry.id, newId);
         }
 
-        // Append all new entries in root-to-leaf order
         for (const newEntry of newEntries) {
             const persisted = this.storage.append(newEntry);
             this.entries.set(persisted.id, persisted);
         }
 
-        // Move leaf to the last new entry (the tip of the fork)
         const lastNewId = newEntries[newEntries.length - 1].id;
         this.moveLeaf(lastNewId);
         return lastNewId;
+    }
+
+    /** Append a message and move the leaf to it. */
+    appendMessage(entry: MessageEntry): Entry {
+        const persisted = this.storage.append(entry);
+        this.entries.set(persisted.id, persisted);
+        this.moveLeaf(persisted.id);
+        return persisted;
+    }
+
+    /** Get the session file path. */
+    getSessionPath(): string {
+        return this.storage['filePath'];
     }
 
     getLeaf(): string | null {
