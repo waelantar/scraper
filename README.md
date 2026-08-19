@@ -135,8 +135,8 @@ Two things worth calling out:
 
 - **The TypeScript gate is separate from the runner.** `npm.cmd run type-check` and
   `npm.cmd run build` pass for the storage, tree, fork, and CLI layers. The compiled suite passes with
-  Node's native runner (`node --test dist\*.test.js`): 22 tests across storage, tree, fork, data-model,
-  and REPL integration suites.
+  Node's native runner (`node --test dist\*.test.js`): 28 tests across storage, tree, fork, data-model,
+  REPL integration, and tree-renderer suites.
 
 ## Design Decisions
 
@@ -172,6 +172,12 @@ parameters, messages go through the tree engine's append operation, and the REPL
 lazy database connection in `finally`. `SESSION_PATH` and `DB_PATH` make the scripted integration test use
 isolated temporary files without changing the normal shared `data/` defaults.
 
+The C14 renderer is a pure projection: `renderTree(entries, leafId)` builds a parent→children lookup, treats
+missing-parent entries as roots, orders roots and siblings by timestamp with an ID tie-breaker, and emits
+`├─`/`└─` ASCII connectors. The current leaf receives a `*` marker, while `Repl` only adapts the returned string
+for `/tree`. The reference study recommends flattening single-child chains; that presentation polish is explicitly
+deferred while the core renderer focuses on complete, deterministic tree output.
+
 ## What I Learned
 
 - A checksum must exclude itself from the hashed payload, and append/load must use the same serialization
@@ -201,6 +207,12 @@ isolated temporary files without changing the normal shared `data/` defaults.
 - ES modules do not provide CommonJS `__dirname`; test paths need to derive from `import.meta.url`. A fast child
   process can also emit `close` before a test attaches its listener, so lifecycle promises must be registered
   immediately after spawning the process.
+- A renderer should not silently drop an entry whose parent is missing. Treating that entry as an orphan root keeps
+  damaged or partially migrated data visible, while a separate `visited` set prevents repeated traversal.
+- ASCII tree connectors depend on sibling position: every non-final root or child uses `├─`, and only the final
+  one uses `└─`. Timestamp ordering with an ID tie-breaker keeps the display chronological but deterministic.
+- Keeping tree rendering as a pure function makes branch layout easy to test without starting the CLI; the REPL
+  can remain responsible only for fetching the entries and printing the result.
 
 ## Roadmap
 
@@ -219,7 +231,7 @@ isolated temporary files without changing the normal shared `data/` defaults.
 - [x] C11 — Tree engine (path reconstruction, persisted leaf, context projection)
 - [x] C12 — Fork (copy path, re-mint IDs, rewrite parents, move leaf)
 - [x] C13 — Interactive CLI (query, view, fork, tree, status, journal-backed messages)
-- [ ] C14 — Tree render polish (ASCII branches and current-leaf marker)
+- [x] C14 — Tree render (ASCII branches, orphan roots, chronological siblings, current-leaf marker)
 - [ ] C15 — Tests + documentation
 
 **Stretch:** recursive crawl with dedup, branch summarization, snapshot+tail loading, WAL mode, packaging.

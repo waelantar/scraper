@@ -3,6 +3,7 @@ import { createInterface } from 'node:readline/promises';
 import { DatabaseSync } from 'node:sqlite';
 import type { TreeEngine } from './tree.js';
 import type { MessageEntry } from './types.js';
+import { renderTree } from './tree-renderer.js';
 
 export class Repl {
     private rl = createInterface({
@@ -168,46 +169,11 @@ export class Repl {
     }
 
     private renderTree(): void {
-        const allEntries = this.tree.getAllEntries();
-        const children = new Map<string, string[]>();
-        for (const [id, entry] of allEntries) {
-            const parent = entry.parentId || 'root';
-            if (!children.has(parent)) children.set(parent, []);
-            children.get(parent)!.push(id);
-        }
-
-        const roots: string[] = [];
-        for (const [id, entry] of allEntries) {
-            if (!entry.parentId) {
-                roots.push(id);
-            }
-        }
-
-        const visited = new Set<string>();
-        const printNode = (id: string, indent: string, isLast: boolean) => {
-            if (visited.has(id)) return;
-            visited.add(id);
-            const entry = allEntries.get(id);
-            if (!entry) return;
-            const prefix = isLast ? '└─ ' : '├─ ';
-            const label = entry.type === 'message'
-                ? `${entry.role}: ${(entry as MessageEntry).content.slice(0, 30)}`
-                : entry.type;
-            console.log(`${indent}${prefix}${id} (${label})`);
-
-            const kids = children.get(id) || [];
-            for (let i = 0; i < kids.length; i++) {
-                const isLastChild = i === kids.length - 1;
-                const childIndent = indent + (isLast ? '   ' : '│  ');
-                printNode(kids[i], childIndent, isLastChild);
-            }
-        };
-
-        for (const root of roots) {
-            printNode(root, '', true);
-        }
-        console.log(`Leaf: ${this.tree.getLeaf() || '(none)'}`);
-    }
+    const allEntries = this.tree.getAllEntries();
+    const leaf = this.tree.getLeaf();
+    const output = renderTree(allEntries, leaf);
+    console.log(output);
+}
 
     private showStatus(): void {
         const all = this.tree.getAllEntries();
